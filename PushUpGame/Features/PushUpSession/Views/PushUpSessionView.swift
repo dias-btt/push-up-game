@@ -12,6 +12,7 @@ import SwiftUI
 struct PushUpSessionView: View {
     // TODO: replace with injected PushUpSession in Step 9
     @State private var service = AVFoundationCameraService()
+    @State private var cameraPosition: AVCaptureDevice.Position = .back
     @State private var latestPose: BodyPose?
     @State private var orientedImageSize = CGSize(width: 9, height: 16)
 
@@ -19,7 +20,7 @@ struct PushUpSessionView: View {
 
     var body: some View {
         ZStack {
-            CameraPreviewView(session: service.session)
+            CameraPreviewView(session: service.session, cameraPosition: cameraPosition)
                 .ignoresSafeArea()
 
             GeometryReader { geometry in
@@ -32,13 +33,28 @@ struct PushUpSessionView: View {
                 }
             }
             .ignoresSafeArea()
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: switchCamera) {
+                        Image(systemName: "arrow.triangle.2.circlepath.camera")
+                            .font(.title2)
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Switch camera")
+                }
+                Spacer()
+            }
+            .padding()
         }
         .task {
             await startCamera()
             // TODO: move frame → pose detection wiring into PushUpSession in Step 9
             await runTemporaryPoseDetectionLogger(
                 frames: service.frames,
-                cameraPosition: service.cameraPosition,
+                cameraPosition: { service.cameraPosition },
                 onPoseUpdate: { pose, imageSize in
                     latestPose = pose
                     orientedImageSize = imageSize
@@ -65,8 +81,21 @@ struct PushUpSessionView: View {
     private func startCamera() async {
         do {
             try await service.start()
+            cameraPosition = service.cameraPosition
         } catch {
             print("Camera start failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func switchCamera() {
+        Task {
+            do {
+                try await service.switchCamera()
+                cameraPosition = service.cameraPosition
+                latestPose = nil
+            } catch {
+                print("Camera switch failed: \(error.localizedDescription)")
+            }
         }
     }
 }
@@ -76,7 +105,7 @@ struct PushUpSessionView: View {
 @concurrent
 nonisolated func runTemporaryPoseDetectionLogger(
     frames: AsyncStream<CVPixelBuffer>,
-    cameraPosition: AVCaptureDevice.Position,
+    cameraPosition: @escaping @Sendable () -> AVCaptureDevice.Position,
     onPoseUpdate: @escaping @MainActor (BodyPose?, CGSize) -> Void
 ) async {
     let poseService = VisionPoseDetectionService()
@@ -95,10 +124,11 @@ nonisolated func runTemporaryPoseDetectionLogger(
     }
 
     for await pixelBuffer in frames {
+        let activeCameraPosition = cameraPosition()
         let orientation = await MainActor.run {
             CGImagePropertyOrientation(
                 deviceOrientation: UIDevice.current.orientation,
-                cameraPosition: cameraPosition
+                cameraPosition: activeCameraPosition
             )
         }
         let imageSize = orientation.orientedImageSize(for: pixelBuffer)
