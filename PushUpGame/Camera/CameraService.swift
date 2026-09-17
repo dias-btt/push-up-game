@@ -18,6 +18,7 @@ nonisolated protocol CameraService: Sendable {
     var cameraPosition: AVCaptureDevice.Position { get }
     func start() async throws
     func stop() async
+    func switchCamera() async throws
 }
 
 enum CameraServiceError: Error, LocalizedError, Sendable {
@@ -31,9 +32,9 @@ enum CameraServiceError: Error, LocalizedError, Sendable {
         case .permissionDenied:
             return "Camera access was denied. Enable the camera for PushUpGame in Settings to count push-ups."
         case .cameraUnavailable:
-            return "The rear wide-angle camera is not available on this device."
+            return "The requested camera is not available on this device."
         case .cannotAddInput:
-            return "Could not add the rear camera as a capture session input."
+            return "Could not add the selected camera as a capture session input."
         case .cannotAddOutput:
             return "Could not add video data output to the capture session."
         }
