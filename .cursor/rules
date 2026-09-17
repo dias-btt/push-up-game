@@ -1,0 +1,77 @@
+# PushUpGame — Cursor Project Rules
+
+## Swift & concurrency
+- Swift Concurrency only: async/await and actors. Do not introduce Combine unless
+  explicitly asked. The one exception is AVFoundation's inherently delegate-based
+  camera callback API — bridge it into AsyncStream at the boundary, don't let delegate
+  patterns leak further into the app.
+- Mark UI-facing types @MainActor explicitly rather than relying on inferred isolation.
+- Prefer actors for shared mutable state accessed from multiple execution contexts
+  (camera callbacks + UI reads). Do not make purely synchronous, single-caller logic
+  (e.g. PushUpAnalyzer, PushUpStateMachine, Geometry) into actors — that adds needless
+  await-hopping for no thread-safety benefit.
+
+## Architecture boundaries
+- Vision may only be imported inside the Vision/ folder.
+- AVFoundation may only be imported inside the Camera/ folder.
+- SwiftUI/UIKit may only be imported inside Features/*/Views/, App/, and UI/.
+- Domain/ must have zero imports beyond Foundation and CoreGraphics. If a change would
+  require importing anything else into Domain/, stop and flag it rather than adding the
+  import.
+- New cross-layer dependencies must go through a protocol if the underlying
+  implementation is something we've said we might replace (currently: CameraService,
+  PoseDetectionService). Do not add new protocols for types that will only ever have
+  one implementation — that's needless abstraction for this project's size.
+
+## Dependency injection
+- Manual, initializer-based injection only. No DI framework. New dependencies get wired
+  in App/AppDependencies.swift.
+
+## Third-party dependencies
+- None allowed without explicit, separate approval. Default to Apple's native
+  frameworks for everything. If you believe a third-party library is truly necessary,
+  stop and explain why before adding it — do not add it silently.
+
+## Error handling
+- No force unwraps (`!`) except where genuinely provably safe with a comment explaining
+  why (e.g. immediately after a guard that establishes the invariant). Prefer
+  `guard let`/`if let`/`??` with sensible fallbacks.
+- Camera/Vision failures should surface as typed errors, not silent no-ops — but should
+  degrade gracefully in the UI (e.g. "camera unavailable" state) rather than crashing.
+
+## Naming & structure
+- No massive View files: if a SwiftUI View's body exceeds roughly 40-50 lines, extract
+  subviews.
+- Match file names to their primary type name.
+- Keep PushUpThresholds.swift as the single source of truth for tunable constants — do
+  not scatter magic numbers for angles/durations/confidence elsewhere in the codebase.
+
+## Testing
+- Any new logic added to Domain/ must ship with corresponding XCTest coverage in the
+  same PR/step.
+- Do not write tests that depend on a physical camera or Vision's actual ML output —
+  those paths are verified manually on-device, not via automated tests.
+
+## Performance
+- Never call Vision's synchronous perform on the main thread.
+- Never convert CVPixelBuffer to UIImage/CGImage unless there is a specific,
+  named reason — Vision consumes CVPixelBuffer directly.
+- Respect the project's frame-throttling design (~15 analyzed frames/sec) rather than
+  running Vision on every camera frame.
+
+## Comments
+- Comment *why*, not *what*, especially around threshold values, coordinate-space
+  conversions (Vision's normalized/bottom-left origin vs. SwiftUI's top-left), and any
+  place mirroring (front camera) is handled.
+
+## Scope discipline
+- Do not add authentication, backend calls, CloudKit, push notifications, analytics
+  SDKs, subscriptions/StoreKit, social features, multiple exercise types, or persistence
+  beyond what's explicitly requested for the current step. If a step's prompt doesn't
+  mention it, don't build it, even if it seems like an obvious next addition.
+
+## Premature optimization
+- Do not add caching, object pooling, or micro-optimizations beyond the explicit
+  guidance already given (e.g. AsyncStream buffering policy, avoiding image-format
+  conversions) unless a real, measured performance problem has been identified via
+  the debug FPS readout.
