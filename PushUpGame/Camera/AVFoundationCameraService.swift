@@ -26,6 +26,8 @@ nonisolated final class AVFoundationCameraService: NSObject, CameraService, AVCa
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "com.pushupgame.camera.session")
     private let sampleBufferQueue = DispatchQueue(label: "com.pushupgame.camera.frames")
+    private let cameraPositionLock = NSLock()
+    private var lockedCameraPosition: AVCaptureDevice.Position = .back
 
     private var isConfigured = false
     /// Session-queue flag so a stop that lands before `startRunning` finishes
@@ -33,7 +35,12 @@ nonisolated final class AVFoundationCameraService: NSObject, CameraService, AVCa
     private var wantsRunning = false
 
     var session: AVCaptureSession { captureSession }
-    let cameraPosition: AVCaptureDevice.Position = .back
+
+    var cameraPosition: AVCaptureDevice.Position {
+        cameraPositionLock.lock()
+        defer { cameraPositionLock.unlock() }
+        return lockedCameraPosition
+    }
 
     override init() {
         var streamContinuation: AsyncStream<CVPixelBuffer>.Continuation!
@@ -87,6 +94,23 @@ nonisolated final class AVFoundationCameraService: NSObject, CameraService, AVCa
         }
     }
 
+    func switchCamera() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            sessionQueue.async { [self] in
+                do {
+                    let newPosition: AVCaptureDevice.Position = cameraPosition == .back ? .front : .back
+                    if isConfigured {
+                        try replaceCameraInput(with: newPosition)
+                    }
+                    setCameraPosition(newPosition)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     // MARK: - Permission
 
     private func requestCameraAccessIfNeeded() async throws {
@@ -122,15 +146,7 @@ nonisolated final class AVFoundationCameraService: NSObject, CameraService, AVCa
             captureSession.sessionPreset = .medium
         }
 
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            throw CameraServiceError.cameraUnavailable
-        }
-
-        let input = try AVCaptureDeviceInput(device: camera)
-        guard captureSession.canAddInput(input) else {
-            throw CameraServiceError.cannotAddInput
-        }
-        captureSession.addInput(input)
+        try addCameraInput(for: cameraPosition)
 
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
@@ -142,6 +158,39 @@ nonisolated final class AVFoundationCameraService: NSObject, CameraService, AVCa
             throw CameraServiceError.cannotAddOutput
         }
         captureSession.addOutput(videoOutput)
+    }
+
+    /// Must be called on `sessionQueue`.
+    private func replaceCameraInput(with position: AVCaptureDevice.Position) throws {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+
+        captureSession.beginConfiguration()
+        defer { captureSession.commitConfiguration() }
+
+        for input in captureSession.inputs {
+            captureSession.removeInput(input)
+        }
+
+        try addCameraInput(for: position)
+    }
+
+    /// Must be called on `sessionQueue` while a configuration block is open.
+    private func addCameraInput(for position: AVCaptureDevice.Position) throws {
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
+            throw CameraServiceError.cameraUnavailable
+        }
+
+        let input = try AVCaptureDeviceInput(device: camera)
+        guard captureSession.canAddInput(input) else {
+            throw CameraServiceError.cannotAddInput
+        }
+        captureSession.addInput(input)
+    }
+
+    private func setCameraPosition(_ position: AVCaptureDevice.Position) {
+        cameraPositionLock.lock()
+        lockedCameraPosition = position
+        cameraPositionLock.unlock()
     }
 
     // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate

@@ -11,11 +11,13 @@ import UIKit
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
+    let cameraPosition: AVCaptureDevice.Position
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        view.updateMirroring(for: cameraPosition)
         return view
     }
 
@@ -24,6 +26,7 @@ struct CameraPreviewView: UIViewRepresentable {
             uiView.previewLayer.session = session
         }
         uiView.previewLayer.videoGravity = .resizeAspectFill
+        uiView.updateMirroring(for: cameraPosition)
     }
 
     final class PreviewView: UIView {
@@ -43,6 +46,15 @@ struct CameraPreviewView: UIViewRepresentable {
         required init?(coder: NSCoder) {
             super.init(coder: coder)
             backgroundColor = .black
+        }
+
+        func updateMirroring(for cameraPosition: AVCaptureDevice.Position) {
+            guard let connection = previewLayer.connection else { return }
+            guard connection.isVideoMirroringSupported else { return }
+            // Manual mirroring is required for front-camera preview; AVFoundation throws if
+            // `automaticallyAdjustsVideoMirroring` is still enabled.
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = cameraPosition == .front
         }
 
         override func layoutSubviews() {

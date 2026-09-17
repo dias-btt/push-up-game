@@ -7,9 +7,26 @@
 
 import Foundation
 
-/// Tunable detection constants for push-up analysis and rep counting.
+/// Tunable constants for push-up detection, pose analysis, and rep counting.
 /// Adjust these values during on-device tuning; tests rely on the defaults below.
 enum PushUpThresholds {
+    // MARK: - Pose confidence
+
+    /// Minimum joint confidence required to use shoulder, elbow, or wrist in arm-angle math.
+    static let minimumArmJointConfidence: Float = 0.5
+
+    /// Minimum joint confidence for shoulder, hip, and ankle when computing body-line angle.
+    static let minimumBodyLineJointConfidence: Float = 0.5
+
+    /// Exponential moving average weight for new elbow-angle samples.
+    static let elbowSmoothingAlpha: Double = 0.4
+
+    /// Number of recent per-side confidence samples used to pick the trusted side.
+    static let confidenceWindowSize = 5
+
+    /// Consecutive frames the alternate side must lead before switching trusted side.
+    static let trustedSideSwitchFrameCount = 5
+
     // MARK: - Elbow angle (degrees)
 
     /// Elbow angle at or above this value is treated as the top / extended position.
