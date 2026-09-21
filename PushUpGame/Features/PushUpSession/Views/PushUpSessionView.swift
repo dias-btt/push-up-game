@@ -6,28 +6,26 @@
 //
 
 import AVFoundation
-import os
 import SwiftUI
 
 struct PushUpSessionView: View {
-    // TODO: replace with injected PushUpSession in Step 9
-    @State private var service = AVFoundationCameraService()
-    @State private var cameraPosition: AVCaptureDevice.Position = .back
-    @State private var latestPose: BodyPose?
-    @State private var orientedImageSize = CGSize(width: 9, height: 16)
+    @Bindable var viewModel: PushUpSessionViewModel
 
     @Environment(\.scenePhase) private var scenePhase
+    @State private var captureSession: AVCaptureSession?
 
     var body: some View {
         ZStack {
-            CameraPreviewView(session: service.session, cameraPosition: cameraPosition)
-                .ignoresSafeArea()
+            if let captureSession {
+                CameraPreviewView(session: captureSession, cameraPosition: viewModel.cameraPosition)
+                    .ignoresSafeArea()
+            }
 
             GeometryReader { geometry in
-                if let latestPose {
+                if let latestPose = viewModel.latestPose {
                     SkeletonOverlayView(
                         pose: latestPose,
-                        orientedImageSize: orientedImageSize,
+                        orientedImageSize: viewModel.orientedImageSize,
                         size: geometry.size
                     )
                 }
@@ -35,9 +33,16 @@ struct PushUpSessionView: View {
             .ignoresSafeArea()
 
             VStack {
+                Text("Reps: \(viewModel.repCount)")
+                    .font(.title)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+
                 HStack {
                     Spacer()
-                    Button(action: switchCamera) {
+                    Button {
+                        Task { await viewModel.switchCamera() }
+                    } label: {
                         Image(systemName: "arrow.triangle.2.circlepath.camera")
                             .font(.title2)
                             .padding(12)
@@ -50,108 +55,21 @@ struct PushUpSessionView: View {
             .padding()
         }
         .task {
-            await startCamera()
-            // TODO: move frame → pose detection wiring into PushUpSession in Step 9
-            await runTemporaryPoseDetectionLogger(
-                frames: service.frames,
-                cameraPosition: { service.cameraPosition },
-                onPoseUpdate: { pose, imageSize in
-                    latestPose = pose
-                    orientedImageSize = imageSize
-                }
-            )
+            captureSession = await viewModel.captureSession()
+            await viewModel.startSession()
         }
         .onDisappear {
-            Task {
-                await service.stop()
-            }
+            Task { await viewModel.stopSession() }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                Task { await startCamera() }
+                Task { await viewModel.startSession() }
             case .background:
-                Task { await service.stop() }
+                Task { await viewModel.stopSession() }
             default:
                 break
             }
-        }
-    }
-
-    private func startCamera() async {
-        do {
-            try await service.start()
-            cameraPosition = service.cameraPosition
-        } catch {
-            print("Camera start failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func switchCamera() {
-        Task {
-            do {
-                try await service.switchCamera()
-                cameraPosition = service.cameraPosition
-                latestPose = nil
-            } catch {
-                print("Camera switch failed: \(error.localizedDescription)")
-            }
-        }
-    }
-}
-
-/// Temporary harness: consume camera frames, log pose stats, and publish the latest pose for the overlay.
-/// TODO: move frame → pose detection wiring into PushUpSession in Step 9
-@concurrent
-nonisolated func runTemporaryPoseDetectionLogger(
-    frames: AsyncStream<CVPixelBuffer>,
-    cameraPosition: @escaping @Sendable () -> AVCaptureDevice.Position,
-    onPoseUpdate: @escaping @MainActor (BodyPose?, CGSize) -> Void
-) async {
-    let poseService = VisionPoseDetectionService()
-    let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "PushUpGame",
-        category: "PoseDetection"
-    )
-
-    await MainActor.run {
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-    }
-    defer {
-        Task { @MainActor in
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
-        }
-    }
-
-    for await pixelBuffer in frames {
-        let activeCameraPosition = cameraPosition()
-        let orientation = await MainActor.run {
-            CGImagePropertyOrientation(
-                deviceOrientation: UIDevice.current.orientation,
-                cameraPosition: activeCameraPosition
-            )
-        }
-        let imageSize = orientation.orientedImageSize(for: pixelBuffer)
-
-        do {
-            if let pose = try poseService.detectPose(in: pixelBuffer, orientation: orientation) {
-                let count = pose.joints.count
-                let averageConfidence: Float
-                if count == 0 {
-                    averageConfidence = 0
-                } else {
-                    let total = pose.joints.values.reduce(Float(0)) { $0 + $1.confidence }
-                    averageConfidence = total / Float(count)
-                }
-                logger.info("BodyPose joints=\(count) avgConfidence=\(averageConfidence, format: .fixed(precision: 2))")
-                await onPoseUpdate(pose, imageSize)
-            } else {
-                logger.info("BodyPose nil (no observation)")
-                await onPoseUpdate(nil, imageSize)
-            }
-        } catch {
-            logger.error("Pose detection failed: \(error.localizedDescription, privacy: .public)")
-            await onPoseUpdate(nil, imageSize)
         }
     }
 }
