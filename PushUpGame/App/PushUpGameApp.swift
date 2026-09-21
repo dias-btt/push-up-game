@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct PushUpGameApp: App {
+    @State private var viewModel = AppDependencies.makePushUpSessionViewModel()
+
     var body: some Scene {
         WindowGroup {
-            PushUpSessionView()
+            PushUpSessionView(viewModel: viewModel)
         }
     }
 }

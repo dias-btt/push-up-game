@@ -48,4 +48,9 @@ enum PushUpThresholds {
 
     /// How long invalid pose data is tolerated before resetting to `.unknown`.
     static let lostTrackingGraceDuration: TimeInterval = 0.5
+
+    // MARK: - Performance
+
+    /// Target rate for Vision + analyzer + state-machine work (camera may run faster).
+    static let targetAnalyzedFramesPerSecond: Double = 15
 }
