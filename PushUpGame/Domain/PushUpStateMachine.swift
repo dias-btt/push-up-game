@@ -11,6 +11,8 @@ import Foundation
 struct PushUpStateMachine {
     private(set) var state: PushUpState = .unknown
     private(set) var repCount = 0
+    private(set) var framesInCurrentState = 0
+    private(set) var lastCompletedRepDuration: TimeInterval?
 
     private var cycleStartTime: Date?
     private var reachedDownThisCycle = false
@@ -24,6 +26,8 @@ struct PushUpStateMachine {
         now: Date,
         framesPerSecond: Double
     ) -> PushUpEvent? {
+        let stateAtStart = state
+
         guard poseValid, let elbowAngle else {
             if trackingLostSince == nil {
                 trackingLostSince = now
@@ -37,62 +41,71 @@ struct PushUpStateMachine {
                 resetCycleTracking()
                 state = .unknown
                 self.trackingLostSince = nil
-                return .positionInvalid(reason: "Pose tracking unavailable")
+                let event = PushUpEvent.positionInvalid(reason: "Pose tracking unavailable")
+                finishTick(startedIn: stateAtStart)
+                return event
             }
+            finishTick(startedIn: stateAtStart)
             return nil
         }
 
         trackingLostSince = nil
         let minSustainFrames = Self.minimumSustainFrames(for: framesPerSecond)
 
+        let event: PushUpEvent?
         switch state {
         case .unknown:
             if elbowAngle >= PushUpThresholds.upThresholdDegrees {
                 state = .ready
-                return .stateChanged(to: .ready)
+                event = .stateChanged(to: .ready)
+            } else {
+                event = nil
             }
 
         case .ready, .up:
             if elbowAngle <= PushUpThresholds.downThresholdDegrees + PushUpThresholds.hysteresisBandDegrees {
                 beginCycle(at: now)
                 state = .descending
-                return .stateChanged(to: .descending)
+                event = .stateChanged(to: .descending)
+            } else {
+                event = nil
             }
 
         case .descending:
             if elbowAngle >= PushUpThresholds.upThresholdDegrees {
                 resetCycleTracking()
                 state = .up
-                return .stateChanged(to: .up)
-            }
-
-            if elbowAngle < PushUpThresholds.downThresholdDegrees {
+                event = .stateChanged(to: .up)
+            } else if elbowAngle < PushUpThresholds.downThresholdDegrees {
                 descendingSustainFrameCount += 1
                 if descendingSustainFrameCount >= minSustainFrames {
                     descendingSustainFrameCount = 0
                     reachedDownThisCycle = true
                     state = .down
-                    return .stateChanged(to: .down)
+                    event = .stateChanged(to: .down)
+                } else {
+                    event = nil
                 }
             } else {
                 descendingSustainFrameCount = 0
+                event = nil
             }
 
         case .down:
             if elbowAngle >= PushUpThresholds.upThresholdDegrees - PushUpThresholds.hysteresisBandDegrees {
                 ascendingSustainFrameCount = 0
                 state = .ascending
-                return .stateChanged(to: .ascending)
+                event = .stateChanged(to: .ascending)
+            } else {
+                event = nil
             }
 
         case .ascending:
             if elbowAngle <= PushUpThresholds.downThresholdDegrees {
                 ascendingSustainFrameCount = 0
                 state = .down
-                return .stateChanged(to: .down)
-            }
-
-            if elbowAngle >= PushUpThresholds.upThresholdDegrees {
+                event = .stateChanged(to: .down)
+            } else if elbowAngle >= PushUpThresholds.upThresholdDegrees {
                 ascendingSustainFrameCount += 1
                 if ascendingSustainFrameCount >= minSustainFrames {
                     ascendingSustainFrameCount = 0
@@ -101,19 +114,32 @@ struct PushUpStateMachine {
 
                     if reachedDownThisCycle, cycleDuration >= PushUpThresholds.minRepDuration {
                         repCount += 1
+                        lastCompletedRepDuration = cycleDuration
                         resetCycleTracking()
-                        return .repCompleted
+                        event = .repCompleted
+                    } else {
+                        resetCycleTracking()
+                        event = .stateChanged(to: .up)
                     }
-
-                    resetCycleTracking()
-                    return .stateChanged(to: .up)
+                } else {
+                    event = nil
                 }
             } else {
                 ascendingSustainFrameCount = 0
+                event = nil
             }
         }
 
-        return nil
+        finishTick(startedIn: stateAtStart)
+        return event
+    }
+
+    private mutating func finishTick(startedIn: PushUpState) {
+        if state == startedIn {
+            framesInCurrentState += 1
+        } else {
+            framesInCurrentState = 1
+        }
     }
 
     private mutating func beginCycle(at now: Date) {
