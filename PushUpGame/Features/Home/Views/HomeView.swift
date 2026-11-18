@@ -11,6 +11,7 @@ import SwiftUI
 /// screen is pushed.
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AlarmScheduleCoordinator.self) private var alarmCoordinator
     @Query(sort: AlarmRecord.listSortDescriptors) private var alarms: [AlarmRecord]
 
     @State private var editorPresentation: AlarmEditorPresentation?
@@ -19,6 +20,11 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             List {
+                AlarmPermissionSection(
+                    authorization: alarmCoordinator.authorization,
+                    hasEnabledAlarms: alarms.contains(where: \.isEnabled),
+                    onRequestPermission: { Task { await alarmCoordinator.requestAuthorization() } }
+                )
                 alarmsSection
                 workoutSection
             }
@@ -69,13 +75,14 @@ struct HomeView: View {
                 ForEach(alarms) { alarm in
                     AlarmRowView(
                         alarm: alarm,
+                        status: alarmCoordinator.status(for: alarm),
+                        isUpdating: alarmCoordinator.isUpdating(alarm.id),
                         onEdit: { editorPresentation = .edit(alarm) },
-                        onToggleEnabled: { setEnabled($0, for: alarm) }
+                        onToggleEnabled: { setEnabled($0, for: alarm) },
+                        onRetry: { Task { await alarmCoordinator.sync(alarm.id) } }
                     )
                 }
                 .onDelete(perform: deleteAlarms)
-            } footer: {
-                SchedulingNoticeView()
             }
         }
     }
@@ -92,26 +99,38 @@ struct HomeView: View {
         }
     }
 
+    /// Desired state is saved first; the system alarm then follows via sync.
     private func setEnabled(_ isEnabled: Bool, for alarm: AlarmRecord) {
-        alarm.isEnabled = isEnabled
-        saveChanges()
+        alarm.setEnabled(isEnabled)
+        let id = alarm.id
+        guard saveChanges() else { return }
+        Task { await alarmCoordinator.sync(id) }
     }
 
     private func deleteAlarms(at offsets: IndexSet) {
+        let ids = offsets.map { alarms[$0].id }
         for index in offsets {
             modelContext.delete(alarms[index])
         }
-        saveChanges()
+        guard saveChanges() else { return }
+        Task {
+            for id in ids {
+                await alarmCoordinator.sync(id)
+            }
+        }
     }
 
     /// Saves explicitly rather than relying on autosave so failures are surfaced
-    /// and the in-memory state is rolled back to match what's on disk.
-    private func saveChanges() {
+    /// and the in-memory state is rolled back to match what's on disk. Nothing is
+    /// sent to the system unless the save succeeded.
+    private func saveChanges() -> Bool {
         do {
             try modelContext.save()
+            return true
         } catch {
             modelContext.rollback()
             persistenceErrorMessage = error.localizedDescription
+            return false
         }
     }
 }
@@ -147,12 +166,8 @@ enum AlarmEditorPresentation: Identifiable {
     if let container = makeSampleAlarmsContainer() {
         HomeView()
             .modelContainer(container)
+            .environment(AlarmScheduleCoordinator(service: AlarmKitService(), modelContext: container.mainContext))
     }
-}
-
-#Preview("Empty") {
-    HomeView()
-        .modelContainer(for: AlarmRecord.self, inMemory: true)
 }
 
 @MainActor

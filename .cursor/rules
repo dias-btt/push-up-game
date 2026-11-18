@@ -14,13 +14,17 @@
 ## Architecture boundaries
 - Vision may only be imported inside the Vision/ folder.
 - AVFoundation may only be imported inside the Camera/ folder.
+- AlarmKit may only be imported inside the SystemAlarms/ folder (and tests that verify its
+  type mapping without scheduling real alarms). AlarmKitService.swift
+  also imports SwiftUI solely because AlarmAttributes requires a `Color` tint.
+- SwiftData may only be imported inside Persistence/, App/, Features/, and Tests/.
 - SwiftUI/UIKit may only be imported inside Features/*/Views/, App/, and UI/.
 - Domain/ must have zero imports beyond Foundation and CoreGraphics. If a change would
   require importing anything else into Domain/, stop and flag it rather than adding the
   import.
 - New cross-layer dependencies must go through a protocol if the underlying
   implementation is something we've said we might replace (currently: CameraService,
-  PoseDetectionService). Do not add new protocols for types that will only ever have
+  PoseDetectionService, AlarmSystemService). Do not add new protocols for types that will only ever have
   one implementation — that's needless abstraction for this project's size.
 
 ## Dependency injection

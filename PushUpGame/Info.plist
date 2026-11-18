@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>PushUpGame schedules the alarms you create so they ring at the time you set, even in Silent mode or Focus.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>PushUpGame uses the camera to watch your push-ups in real time and count your repetitions.</string>
 </dict>

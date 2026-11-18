@@ -12,14 +12,14 @@ import SwiftUI
 struct PushUpGameApp: App {
     /// Created once at launch. A failure (e.g. corrupt store, full disk) is shown
     /// to the user instead of crashing on launch.
-    private let modelContainer = Result { try AppDependencies.makeModelContainer() }
+    private let environment = Result { try AppDependencies.makeAppEnvironment() }
 
     var body: some Scene {
         WindowGroup {
-            switch modelContainer {
-            case .success(let container):
-                HomeView()
-                    .modelContainer(container)
+            switch environment {
+            case .success(let environment):
+                AppRootView(alarmCoordinator: environment.alarmCoordinator)
+                    .modelContainer(environment.modelContainer)
             case .failure(let error):
                 StorageUnavailableView(error: error)
             }
