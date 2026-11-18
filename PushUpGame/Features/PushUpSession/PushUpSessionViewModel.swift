@@ -31,6 +31,7 @@ final class PushUpSessionViewModel {
 
     private let session: PushUpSession
     private var consumeTask: Task<Void, Never>?
+    private var isSessionRequested = false
     private var lastUpdateTimestamp: Date?
     private var fpsIntervals: [TimeInterval] = []
 
@@ -44,12 +45,17 @@ final class PushUpSessionViewModel {
 
     /// Starts camera + pose detection for positioning feedback (no rep counting yet).
     func startPositioning() async {
+        isSessionRequested = true
         do {
             try await session.start()
             cameraPosition = await session.cameraPosition()
 
             consumeTask?.cancel()
             let updates = await session.updates
+            // stopSession() may have run during the awaits above. A consumer created
+            // now would wait forever on a stream that never finishes and keep the
+            // whole session graph alive after the screen is gone.
+            guard isSessionRequested else { return }
             consumeTask = Task { @MainActor in
                 for await update in updates {
                     apply(update)
@@ -71,6 +77,7 @@ final class PushUpSessionViewModel {
     }
 
     func stopSession() async {
+        isSessionRequested = false
         consumeTask?.cancel()
         consumeTask = nil
         isWorkoutActive = false

@@ -31,6 +31,7 @@ actor PushUpSession {
     private var stateMachine = PushUpStateMachine()
     private var positionValidator = PositionValidator()
     private var workoutActive = false
+    private var isRunRequested = false
     private var processingTask: Task<Void, Never>?
     private var updateContinuation: AsyncStream<SessionUpdate>.Continuation?
 
@@ -59,7 +60,16 @@ actor PushUpSession {
 
     /// Starts camera capture and lightweight pose/positioning processing.
     func start() async throws {
+        isRunRequested = true
         try await cameraService.start()
+
+        // stop() can run while camera start is suspended (actor reentrancy), e.g.
+        // when the user leaves the workout screen during capture warm-up. Honour
+        // the latest intent so no capture session or processing loop outlives the UI.
+        guard isRunRequested else {
+            await cameraService.stop()
+            return
+        }
 
         guard processingTask == nil else { return }
 
@@ -78,6 +88,7 @@ actor PushUpSession {
     }
 
     func stop() async {
+        isRunRequested = false
         processingTask?.cancel()
         processingTask = nil
         workoutActive = false
