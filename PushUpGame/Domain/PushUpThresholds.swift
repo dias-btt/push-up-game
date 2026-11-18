@@ -53,4 +53,20 @@ enum PushUpThresholds {
 
     /// Target rate for Vision + analyzer + state-machine work (camera may run faster).
     static let targetAnalyzedFramesPerSecond: Double = 15
+
+    // MARK: - Positioning guide
+
+    static let positioningMinimumJointConfidence: Float = 0.5
+
+    /// Visible-joint bounding-box area below this fraction is treated as too far away.
+    static let positioningMinimumBoundingBoxArea: Double = 0.08
+
+    /// Visible-joint bounding-box area above this fraction is treated as too close.
+    static let positioningMaximumBoundingBoxArea: Double = 0.65
+
+    /// Normalized margin from frame edges that counts as clipped / partially out of frame.
+    static let positioningFrameEdgeMargin: Double = 0.05
+
+    /// Consecutive positioning evaluations that must pass before reporting `.ready`.
+    static let positioningReadyFrameCount = 5
 }

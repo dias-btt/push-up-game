@@ -11,12 +11,16 @@ import Foundation
 import UIKit
 
 struct SessionUpdate: Sendable {
+    let timestamp: Date
     let pose: BodyPose?
     let analyzedFrame: AnalyzedFrame
     let state: PushUpState
     let repCount: Int
     let event: PushUpEvent?
     let orientedImageSize: CGSize
+    let positioningStatus: PositioningStatus
+    let framesInCurrentState: Int
+    let lastRepDuration: TimeInterval?
 }
 
 actor PushUpSession {
@@ -25,6 +29,8 @@ actor PushUpSession {
 
     private var analyzer = PushUpAnalyzer()
     private var stateMachine = PushUpStateMachine()
+    private var positionValidator = PositionValidator()
+    private var workoutActive = false
     private var processingTask: Task<Void, Never>?
     private var updateContinuation: AsyncStream<SessionUpdate>.Continuation?
 
@@ -51,6 +57,7 @@ actor PushUpSession {
         try await cameraService.switchCamera()
     }
 
+    /// Starts camera capture and lightweight pose/positioning processing.
     func start() async throws {
         try await cameraService.start()
 
@@ -61,9 +68,22 @@ actor PushUpSession {
         }
     }
 
+    func beginWorkout() {
+        workoutActive = true
+        analyzer = PushUpAnalyzer()
+        stateMachine = PushUpStateMachine()
+        #if DEBUG
+        DebugSessionLogger.shared.startSession()
+        #endif
+    }
+
     func stop() async {
         processingTask?.cancel()
         processingTask = nil
+        workoutActive = false
+        #if DEBUG
+        DebugSessionLogger.shared.stopSession()
+        #endif
         await cameraService.stop()
     }
 
@@ -85,6 +105,9 @@ actor PushUpSession {
             lastProcessedTime = now
 
             let update = await buildSessionUpdate(from: pixelBuffer, at: now)
+            #if DEBUG
+            DebugSessionLogger.shared.log(update: update)
+            #endif
             updateContinuation?.yield(update)
         }
 
@@ -124,6 +147,23 @@ actor PushUpSession {
     }
 
     private func applyAnalysis(inputs: PoseFrameInputs, at now: Date) -> SessionUpdate {
+        let positioningStatus = positionValidator.evaluate(inputs.pose)
+
+        guard workoutActive else {
+            return SessionUpdate(
+                timestamp: now,
+                pose: inputs.pose,
+                analyzedFrame: Self.idleAnalyzedFrame,
+                state: .unknown,
+                repCount: 0,
+                event: nil,
+                orientedImageSize: inputs.orientedImageSize,
+                positioningStatus: positioningStatus,
+                framesInCurrentState: 0,
+                lastRepDuration: nil
+            )
+        }
+
         let analyzedFrame = analyzer.process(inputs.pose ?? BodyPose(joints: [:]), at: now)
 
         let event = stateMachine.update(
@@ -134,12 +174,27 @@ actor PushUpSession {
         )
 
         return SessionUpdate(
+            timestamp: now,
             pose: inputs.pose,
             analyzedFrame: analyzedFrame,
             state: stateMachine.state,
             repCount: stateMachine.repCount,
             event: event,
-            orientedImageSize: inputs.orientedImageSize
+            orientedImageSize: inputs.orientedImageSize,
+            positioningStatus: positioningStatus,
+            framesInCurrentState: stateMachine.framesInCurrentState,
+            lastRepDuration: stateMachine.lastCompletedRepDuration
         )
     }
+
+    private static let idleAnalyzedFrame = AnalyzedFrame(
+        leftElbowAngle: nil,
+        rightElbowAngle: nil,
+        leftElbowConfidence: nil,
+        rightElbowConfidence: nil,
+        bodyLineAngle: nil,
+        trustedSide: nil,
+        smoothedTrustedElbowAngle: nil,
+        poseValid: false
+    )
 }

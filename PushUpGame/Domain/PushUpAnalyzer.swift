@@ -16,6 +16,8 @@ enum Side: Equatable, Sendable {
 struct AnalyzedFrame: Equatable, Sendable {
     let leftElbowAngle: Double?
     let rightElbowAngle: Double?
+    let leftElbowConfidence: Float?
+    let rightElbowConfidence: Float?
     let bodyLineAngle: Double?
     let trustedSide: Side?
     let smoothedTrustedElbowAngle: Double?
@@ -67,6 +69,8 @@ struct PushUpAnalyzer {
         return AnalyzedFrame(
             leftElbowAngle: leftArm?.elbowAngle,
             rightElbowAngle: rightArm?.elbowAngle,
+            leftElbowConfidence: leftArm?.averageConfidence,
+            rightElbowConfidence: rightArm?.averageConfidence,
             bodyLineAngle: bodyLineAngle,
             trustedSide: trustedSide,
             smoothedTrustedElbowAngle: smoothedTrustedElbowAngle,
