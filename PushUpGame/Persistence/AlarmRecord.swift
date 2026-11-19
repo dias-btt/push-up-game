@@ -35,6 +35,11 @@ final class AlarmRecord {
     /// never vouch for settings the system hasn't seen. Optional so existing
     /// stores migrate automatically (lightweight migration).
     private(set) var scheduleConfirmedAt: Date?
+    /// Alert presentation version confirmed together with `scheduleConfirmedAt`
+    /// (see `AlarmSyncPlanner.currentPresentationVersion`). `nil` for alarms
+    /// scheduled before the "Start Push-Ups" action existed; optional for
+    /// lightweight migration.
+    private(set) var confirmedPresentationVersion: Int?
 
     init(configuration: AlarmConfiguration, id: UUID = UUID(), createdAt: Date = .now) throws {
         let valid = try configuration.validated()
@@ -53,7 +58,7 @@ final class AlarmRecord {
     func update(with configuration: AlarmConfiguration) throws {
         let valid = try configuration.validated()
         guard valid != self.configuration else { return }
-        scheduleConfirmedAt = nil
+        clearConfirmation()
         title = valid.title
         hour = valid.time.hour
         minute = valid.time.minute
@@ -81,22 +86,33 @@ final class AlarmRecord {
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
         isEnabled = enabled
-        scheduleConfirmedAt = nil
+        clearConfirmation()
     }
 
     /// Records that the system accepted `schedule` at `date`. Ignored if the
     /// configuration changed while the system call was in flight, so the
     /// confirmation always describes what is stored.
-    func confirmSchedule(_ schedule: AlarmSchedule, title: String, at date: Date) {
+    func confirmSchedule(
+        _ schedule: AlarmSchedule,
+        title: String,
+        at date: Date,
+        presentationVersion: Int = AlarmSyncPlanner.currentPresentationVersion
+    ) {
         guard isEnabled, schedule == self.schedule, title == configuration.displayTitle else { return }
         scheduleConfirmedAt = date
+        confirmedPresentationVersion = presentationVersion
     }
 
     /// A one-time alarm rang and the system removed it: turn it off, matching
     /// the behaviour of system alarms.
     func markExpired() {
         isEnabled = false
+        clearConfirmation()
+    }
+
+    private func clearConfirmation() {
         scheduleConfirmedAt = nil
+        confirmedPresentationVersion = nil
     }
 
     var schedule: AlarmSchedule {
@@ -109,7 +125,8 @@ final class AlarmRecord {
             title: configuration.displayTitle,
             schedule: schedule,
             isEnabled: isEnabled,
-            scheduleConfirmedAt: scheduleConfirmedAt
+            scheduleConfirmedAt: scheduleConfirmedAt,
+            confirmedPresentationVersion: confirmedPresentationVersion
         )
     }
 
@@ -127,4 +144,27 @@ final class AlarmRecord {
         SortDescriptor(\.minute),
         SortDescriptor(\.createdAt),
     ]
+}
+
+// MARK: - Alarm challenge
+
+extension AlarmRecord {
+    var challenge: AlarmChallenge {
+        let configuration = configuration
+        return AlarmChallenge(
+            alarmID: id,
+            title: configuration.displayTitle,
+            pushUpTarget: configuration.pushUpTarget
+        )
+    }
+
+    /// Looks up the challenge for an alarm ID delivered by the alarm alert.
+    /// Disabled alarms still resolve: a one-time alarm is turned off right
+    /// after it rings, which is exactly when its challenge is opened. A fetch
+    /// failure is treated like a missing alarm so routing degrades to a notice.
+    static func challenge(for id: UUID, in context: ModelContext) -> AlarmChallenge? {
+        var descriptor = FetchDescriptor<AlarmRecord>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first?.challenge
+    }
 }

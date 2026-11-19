@@ -12,13 +12,15 @@ import SwiftUI
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AlarmScheduleCoordinator.self) private var alarmCoordinator
+    @Environment(AlarmChallengeRouter.self) private var challengeRouter
     @Query(sort: AlarmRecord.listSortDescriptors) private var alarms: [AlarmRecord]
 
     @State private var editorPresentation: AlarmEditorPresentation?
     @State private var persistenceErrorMessage: String?
 
     var body: some View {
-        NavigationStack {
+        @Bindable var challengeRouter = challengeRouter
+        NavigationStack(path: $challengeRouter.path) {
             List {
                 AlarmPermissionSection(
                     authorization: alarmCoordinator.authorization,
@@ -42,7 +44,18 @@ struct HomeView: View {
                 switch route {
                 case .manualWorkout:
                     ManualWorkoutView()
+                case .alarmChallenge(let alarmID):
+                    AlarmChallengeView(alarmID: alarmID)
                 }
+            }
+            .onChange(of: challengeRouter.activeChallengeID) { _, alarmID in
+                // An alarm challenge takes over the screen; a sheet would hide it.
+                if alarmID != nil { editorPresentation = nil }
+            }
+            .alert("Alarm Not Found", isPresented: $challengeRouter.isShowingUnavailableAlarmNotice) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("This alarm was deleted, so there's no challenge to start.")
             }
             .sheet(item: $editorPresentation) { presentation in
                 AlarmEditorView(alarm: presentation.alarm)
@@ -135,10 +148,6 @@ struct HomeView: View {
     }
 }
 
-enum HomeRoute: Hashable {
-    case manualWorkout
-}
-
 enum AlarmEditorPresentation: Identifiable {
     case create
     case edit(AlarmRecord)
@@ -167,6 +176,7 @@ enum AlarmEditorPresentation: Identifiable {
         HomeView()
             .modelContainer(container)
             .environment(AlarmScheduleCoordinator(service: AlarmKitService(), modelContext: container.mainContext))
+            .environment(AlarmChallengeRouter(store: AlarmChallengeRequestStore(defaults: UserDefaults(suiteName: "preview") ?? .standard)))
     }
 }
 

@@ -370,6 +370,41 @@ final class AlarmScheduleCoordinatorTests: XCTestCase {
         XCTAssertTrue(service.cancelCalls.isEmpty)
     }
 
+    func testAlarmScheduledByPreviousBuildIsUpgradedOnce() async throws {
+        let record = try insert(AlarmConfiguration(title: "Gym", repeatDays: .weekdays))
+        // Confirmed by the previous build, before the "Start Push-Ups" action.
+        record.confirmSchedule(record.schedule, title: "Gym", at: currentDate, presentationVersion: 0)
+        try context.save()
+        service.alarms = [record.id: SystemAlarm(id: record.id, schedule: record.schedule, isAlerting: false)]
+
+        coordinator = makeCoordinator()
+        await coordinator.reconcileAll()
+
+        XCTAssertEqual(service.scheduleCalls.map(\.id), [record.id], "replaced under the same ID")
+        XCTAssertEqual(service.alarms.count, 1, "no duplicate")
+        XCTAssertEqual(record.confirmedPresentationVersion, AlarmSyncPlanner.currentPresentationVersion)
+        XCTAssertTrue(record.isEnabled)
+
+        // Later launches leave it alone: no rescheduling loop.
+        service.resetCallLog()
+        coordinator = makeCoordinator()
+        await coordinator.reconcileAll()
+        XCTAssertTrue(service.scheduleCalls.isEmpty)
+        XCTAssertTrue(service.cancelCalls.isEmpty)
+    }
+
+    func testRingingAlarmFromPreviousBuildIsNotReplaced() async throws {
+        let record = try insert(AlarmConfiguration(repeatDays: .everyDay))
+        record.confirmSchedule(record.schedule, title: record.configuration.displayTitle, at: currentDate, presentationVersion: 0)
+        try context.save()
+        service.alarms = [record.id: SystemAlarm(id: record.id, schedule: record.schedule, isAlerting: true)]
+
+        await coordinator.reconcileAll()
+
+        XCTAssertTrue(service.scheduleCalls.isEmpty)
+        XCTAssertTrue(service.cancelCalls.isEmpty)
+    }
+
     func testExpiredOneTimeAlarmIsTurnedOffInsteadOfRearmed() async throws {
         let sevenAM = try AlarmTime(hour: 7, minute: 0)
         currentDate = try date(hour: 6)

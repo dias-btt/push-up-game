@@ -12,6 +12,8 @@ import SwiftUI
 ///
 /// Alert-only: no countdown, snooze, or Live Activity presentation, so no
 /// widget extension is required (AlarmKit only expects one for countdowns).
+/// The alert carries a custom "Start Push-Ups" button that runs
+/// `StartPushUpChallengeIntent` with the alarm's stable ID.
 @MainActor
 final class AlarmKitService: AlarmSystemService {
     private let manager: AlarmManager
@@ -45,8 +47,20 @@ final class AlarmKitService: AlarmSystemService {
         // undocumented, so remove it explicitly to guarantee no duplicates.
         try cancel(id: id)
 
+        // The system keeps providing its own Stop button (iOS 26.1+); the
+        // secondary button only adds a way into the challenge.
+        // Bump `AlarmSyncPlanner.currentPresentationVersion` whenever this
+        // presentation or its intents change, so existing alarms are upgraded.
         let presentation = AlarmPresentation(
-            alert: AlarmPresentation.Alert(title: LocalizedStringResource(stringLiteral: title))
+            alert: AlarmPresentation.Alert(
+                title: LocalizedStringResource(stringLiteral: title),
+                secondaryButton: AlarmButton(
+                    text: "Start Push-Ups",
+                    textColor: .white,
+                    systemImageName: "figure.strengthtraining.functional"
+                ),
+                secondaryButtonBehavior: .custom
+            )
         )
         let attributes = AlarmAttributes<PushUpAlarmMetadata>(
             presentation: presentation,
@@ -55,7 +69,8 @@ final class AlarmKitService: AlarmSystemService {
         )
         let configuration = AlarmManager.AlarmConfiguration<PushUpAlarmMetadata>.alarm(
             schedule: Self.alarmKitSchedule(from: schedule),
-            attributes: attributes
+            attributes: attributes,
+            secondaryIntent: StartPushUpChallengeIntent(alarmID: id)
         )
 
         do {

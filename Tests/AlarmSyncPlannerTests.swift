@@ -80,6 +80,59 @@ final class AlarmSyncPlannerTests: XCTestCase {
         XCTAssertEqual(action(desired: desired(), system: nil, now: date(hour: 9)), .schedule(oneTime7am))
     }
 
+    // MARK: - Presentation upgrade (alarms scheduled before "Start Push-Ups")
+
+    func testAlarmConfirmedWithoutPresentationVersionIsRescheduled() {
+        let legacy = desired(confirmedAt: date(hour: 6), presentationVersion: nil)
+        XCTAssertEqual(action(desired: legacy, system: system(schedule: oneTime7am)), .schedule(oneTime7am))
+    }
+
+    func testRecurringAlarmWithOutdatedPresentationIsRescheduled() throws {
+        let recurring = AlarmSchedule(time: try AlarmTime(hour: 7, minute: 0), weekdays: .everyDay)
+        let legacy = desired(schedule: recurring, confirmedAt: date(hour: 6), presentationVersion: 0)
+        XCTAssertEqual(
+            action(desired: legacy, system: system(schedule: recurring), now: date(hour: 9)),
+            .schedule(recurring)
+        )
+    }
+
+    func testAlarmWithCurrentPresentationIsNotRescheduledAgain() {
+        // After the upgrade the confirmation carries the current version: no loop.
+        let upgraded = desired(confirmedAt: date(hour: 6))
+        XCTAssertEqual(action(desired: upgraded, system: system(schedule: oneTime7am)), .none)
+    }
+
+    func testRingingAlarmWithOutdatedPresentationIsNotInterrupted() {
+        let legacy = desired(confirmedAt: date(hour: 6), presentationVersion: nil)
+        XCTAssertEqual(action(desired: legacy, system: system(schedule: oneTime7am, alerting: true)), .none)
+    }
+
+    func testOutdatedOneTimeAlarmPastFireTimeIsNotRearmed() {
+        // Still listed just after 07:00 but not yet removed by the system:
+        // replacing it would schedule it for tomorrow.
+        let legacy = desired(confirmedAt: date(hour: 6), presentationVersion: nil)
+        XCTAssertEqual(
+            action(desired: legacy, system: system(schedule: oneTime7am), now: date(hour: 7, minute: 1)),
+            .none
+        )
+    }
+
+    func testOutdatedOneTimeAlarmMissingAfterFireTimeStillExpires() {
+        let legacy = desired(confirmedAt: date(hour: 6), presentationVersion: nil)
+        XCTAssertEqual(action(desired: legacy, system: nil, now: date(hour: 7, minute: 1)), .expire)
+    }
+
+    func testDisabledAlarmWithOutdatedPresentationIsStillCancelled() {
+        let legacy = desired(enabled: false, confirmedAt: date(hour: 6), presentationVersion: nil)
+        XCTAssertEqual(action(desired: legacy, system: system(schedule: oneTime7am)), .cancel)
+    }
+
+    func testOutdatedPresentationStillReportsScheduled() {
+        // It will ring; only the extra button is missing until the upgrade.
+        let legacy = desired(confirmedAt: date(hour: 6), presentationVersion: nil)
+        XCTAssertEqual(status(legacy, system(schedule: oneTime7am)), .scheduled)
+    }
+
     // MARK: - Status
 
     func testStatusPriorities() {
@@ -109,14 +162,16 @@ final class AlarmSyncPlannerTests: XCTestCase {
     private func desired(
         schedule: AlarmSchedule? = nil,
         enabled: Bool = true,
-        confirmedAt: Date? = nil
+        confirmedAt: Date? = nil,
+        presentationVersion: Int? = AlarmSyncPlanner.currentPresentationVersion
     ) -> DesiredAlarm {
         DesiredAlarm(
             id: id,
             title: "Alarm",
             schedule: schedule ?? oneTime7am,
             isEnabled: enabled,
-            scheduleConfirmedAt: confirmedAt
+            scheduleConfirmedAt: confirmedAt,
+            confirmedPresentationVersion: confirmedAt == nil ? nil : presentationVersion
         )
     }
 

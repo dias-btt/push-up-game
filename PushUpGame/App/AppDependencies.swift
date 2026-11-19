@@ -40,6 +40,13 @@ enum AppDependencies {
         return AppEnvironment(modelContainer: container, alarmCoordinator: coordinator)
     }
 
+    /// Independent of the model container so the alarm intent can always be
+    /// delivered, even if storage failed to load.
+    @MainActor
+    static func makeAlarmChallengeRouter() -> AlarmChallengeRouter {
+        AlarmChallengeRouter(store: AlarmChallengeRequestStore())
+    }
+
     static let persistentSchema = Schema([AlarmRecord.self])
 
     /// On-disk store for the app; tests pass `inMemory: true` for an isolated store
