@@ -27,6 +27,8 @@ import SwiftData
 ///   → cancelled as an orphan.
 /// - Disabled locally, cancel failed → cancelled on next pass.
 /// - One-time alarm rang and was removed by the system → turned off locally.
+/// - Alarm scheduled by an older build with an outdated alert presentation →
+///   rescheduled once under the same ID; the new confirmation stops repeats.
 ///
 /// **Concurrency.** Operations are serialized per alarm ID. A sync requested
 /// while one is in flight is coalesced into a single follow-up pass that reads
@@ -211,7 +213,12 @@ final class AlarmScheduleCoordinator {
                 // confirmSchedule ignores a mismatch and the coalesced follow-up
                 // pass reschedules with the latest state.
                 if let current = try? fetchRecord(id) {
-                    current.confirmSchedule(schedule, title: title, at: now())
+                    current.confirmSchedule(
+                        schedule,
+                        title: title,
+                        at: now(),
+                        presentationVersion: AlarmSyncPlanner.currentPresentationVersion
+                    )
                     saveContext(recordingErrorFor: id)
                 }
             } catch {
