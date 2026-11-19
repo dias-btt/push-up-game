@@ -57,9 +57,4 @@ final class AlarmConfigurationTests: XCTestCase {
         let configuration = AlarmConfiguration(repeatDays: WeekdaySet(rawValue: 0b1000_0000))
         XCTAssertEqual(configuration.validationError, .invalidRepeatDays(rawValue: 0b1000_0000))
     }
-
-    func testSchedulingStatusNeverClaimsScheduled() {
-        XCTAssertEqual(AlarmSchedulingStatus(isEnabled: true), .notScheduled)
-        XCTAssertEqual(AlarmSchedulingStatus(isEnabled: false), .off)
-    }
 }

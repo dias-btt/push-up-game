@@ -12,6 +12,7 @@ struct AlarmEditorView: View {
     let alarm: AlarmRecord?
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(AlarmScheduleCoordinator.self) private var alarmCoordinator
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft: AlarmConfiguration
@@ -138,14 +139,24 @@ struct AlarmEditorView: View {
 
     // MARK: - Persistence
 
+    /// Persists the desired state, then asks the coordinator to bring the
+    /// system alarm in line. Scheduling outcomes (including a permission prompt
+    /// on the first enabled alarm) show up on the alarm's row, so the editor
+    /// can dismiss immediately.
     private func save() {
         do {
+            let id: UUID
             if let alarm {
                 try alarm.update(with: draft)
+                id = alarm.id
             } else {
-                modelContext.insert(try AlarmRecord(configuration: draft))
+                let record = try AlarmRecord(configuration: draft)
+                modelContext.insert(record)
+                id = record.id
             }
             try modelContext.save()
+            let coordinator = alarmCoordinator
+            Task { await coordinator.sync(id) }
             dismiss()
         } catch {
             modelContext.rollback()
@@ -155,18 +166,16 @@ struct AlarmEditorView: View {
 
     private func delete() {
         guard let alarm else { return }
+        let id = alarm.id
         modelContext.delete(alarm)
         do {
             try modelContext.save()
+            let coordinator = alarmCoordinator
+            Task { await coordinator.sync(id) }
             dismiss()
         } catch {
             modelContext.rollback()
             errorMessage = error.localizedDescription
         }
     }
-}
-
-#Preview("New alarm") {
-    AlarmEditorView(alarm: nil)
-        .modelContainer(for: AlarmRecord.self, inMemory: true)
 }

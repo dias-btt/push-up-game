@@ -86,12 +86,11 @@ final class AlarmPersistenceTests: XCTestCase {
         context.insert(record)
         try context.save()
 
-        record.isEnabled = false
+        record.setEnabled(false)
         try context.save()
 
         let fetched = try XCTUnwrap(fetchAll().first)
         XCTAssertFalse(fetched.isEnabled)
-        XCTAssertEqual(fetched.schedulingStatus, .off)
     }
 
     func testDelete() throws {

@@ -24,6 +24,22 @@ enum AppDependencies {
         return PushUpSessionViewModel(session: session)
     }
 
+    /// Long-lived objects created once at launch.
+    struct AppEnvironment {
+        let modelContainer: ModelContainer
+        let alarmCoordinator: AlarmScheduleCoordinator
+    }
+
+    @MainActor
+    static func makeAppEnvironment() throws -> AppEnvironment {
+        let container = try makeModelContainer()
+        let coordinator = AlarmScheduleCoordinator(
+            service: AlarmKitService(),
+            modelContext: container.mainContext
+        )
+        return AppEnvironment(modelContainer: container, alarmCoordinator: coordinator)
+    }
+
     static let persistentSchema = Schema([AlarmRecord.self])
 
     /// On-disk store for the app; tests pass `inMemory: true` for an isolated store

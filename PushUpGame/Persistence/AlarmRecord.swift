@@ -16,7 +16,10 @@ import SwiftData
 /// fields are only writable through `init(configuration:)` and
 /// `update(with:)`, so invalid values cannot be persisted from the UI.
 ///
-/// Holds no scheduling state on purpose — see `AlarmSchedulingStatus`.
+/// Whether the alarm is actually scheduled is never stored here; it is derived
+/// from the live system alarm list (see `AlarmSchedulingStatus`). The only
+/// scheduling bookkeeping is `scheduleConfirmedAt`, used to recognise one-time
+/// alarms that already rang.
 @Model
 final class AlarmRecord {
     @Attribute(.unique) private(set) var id: UUID
@@ -25,8 +28,13 @@ final class AlarmRecord {
     private(set) var minute: Int
     private(set) var repeatDaysRawValue: Int
     private(set) var pushUpTarget: Int
-    var isEnabled: Bool
+    private(set) var isEnabled: Bool
     private(set) var createdAt: Date
+    /// When the system last confirmed scheduling the *current* configuration.
+    /// Cleared on every change to the configuration so a stale confirmation can
+    /// never vouch for settings the system hasn't seen. Optional so existing
+    /// stores migrate automatically (lightweight migration).
+    private(set) var scheduleConfirmedAt: Date?
 
     init(configuration: AlarmConfiguration, id: UUID = UUID(), createdAt: Date = .now) throws {
         let valid = try configuration.validated()
@@ -44,6 +52,8 @@ final class AlarmRecord {
     /// the configuration is invalid.
     func update(with configuration: AlarmConfiguration) throws {
         let valid = try configuration.validated()
+        guard valid != self.configuration else { return }
+        scheduleConfirmedAt = nil
         title = valid.title
         hour = valid.time.hour
         minute = valid.time.minute
@@ -68,16 +78,47 @@ final class AlarmRecord {
         )
     }
 
+    func setEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        isEnabled = enabled
+        scheduleConfirmedAt = nil
+    }
+
+    /// Records that the system accepted `schedule` at `date`. Ignored if the
+    /// configuration changed while the system call was in flight, so the
+    /// confirmation always describes what is stored.
+    func confirmSchedule(_ schedule: AlarmSchedule, title: String, at date: Date) {
+        guard isEnabled, schedule == self.schedule, title == configuration.displayTitle else { return }
+        scheduleConfirmedAt = date
+    }
+
+    /// A one-time alarm rang and the system removed it: turn it off, matching
+    /// the behaviour of system alarms.
+    func markExpired() {
+        isEnabled = false
+        scheduleConfirmedAt = nil
+    }
+
+    var schedule: AlarmSchedule {
+        AlarmSchedule(time: time, weekdays: repeatDays)
+    }
+
+    var desiredState: DesiredAlarm {
+        DesiredAlarm(
+            id: id,
+            title: configuration.displayTitle,
+            schedule: schedule,
+            isEnabled: isEnabled,
+            scheduleConfirmedAt: scheduleConfirmedAt
+        )
+    }
+
     var time: AlarmTime {
         AlarmTime(clampingHour: hour, minute: minute)
     }
 
     var repeatDays: WeekdaySet {
         WeekdaySet(rawValue: repeatDaysRawValue).intersection(.everyDay)
-    }
-
-    var schedulingStatus: AlarmSchedulingStatus {
-        AlarmSchedulingStatus(isEnabled: isEnabled)
     }
 
     /// Default ordering for lists: by time of day, then oldest first for ties.
